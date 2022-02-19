@@ -1,0 +1,69 @@
+cabal-version:      2.4
+name:               hcat
+version:            0.1.0.0
+
+synopsis: Chapter 8
+description: See README at <https://github.com/lfborjas/hcat>
+
+
+license-file: LICENSE
+
+author:             Luis Borjas Reyes
+maintainer:         hello@lfborjas.com
+bug-reports: https://github.com/lfborjas/hcat/issues
+
+
+extra-source-files: 
+LICENSE
+
+    README.md
+
+source-repository head
+    type: git
+    location: https://github.com/lfborjas/hcat
+
+
+-- Inspired by:
+-- https://github.com/tchoutri/pg-entity/blob/e5fc4cfe8fcaf2a5a6d76f983c9a60b25a57777a/pg-entity.cabal 
+common common-extensions
+    default-extensions:
+        DerivingStrategies
+        DerivingVia
+        DeriveGeneric
+        DataKinds
+        GeneralizedNewtypeDeriving
+        NamedFieldPuns
+        OverloadedStrings  
+        TypeOperators
+    default-language: Haskell2010
+
+common common-ghc-options
+    ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wpartial-fields -Wredundant-constraints
+
+library
+    import: common-extensions
+    import: common-ghc-options
+    exposed-modules: 
+      HCat 
+    build-depends:    
+      base >= 4.13 && <= 4.17
+      , containers
+      , time
+      , bytestring
+      , text
+      , optics
+      , mtl
+      
+      
+
+    hs-source-dirs:   src
+
+executable hcat-exe
+    main-is: Main.hs
+    build-depends:
+      base
+      , hcat
+    hs-source-dirs: app
+    ghc-options: -threaded -rtsopts -with-rtsopts=-N
+    default-language:    Haskell2010
+
