@@ -51,14 +51,14 @@ library
       , time
       , bytestring
       , text
-      , optics
-      , mtl
+      , process
+      , directory
       
       
 
     hs-source-dirs:   src
 
-executable hcat-exe
+executable hcat
     main-is: Main.hs
     build-depends:
       base

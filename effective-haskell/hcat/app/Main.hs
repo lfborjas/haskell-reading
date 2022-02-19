@@ -1,6 +1,6 @@
 module Main where
 
-import HCat (run)
+import HCat (runHCat)
 
 main :: IO ()
-main = run
+main = runHCat
