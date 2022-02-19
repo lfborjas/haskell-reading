@@ -1,5 +1,6 @@
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE RecordWildCards #-}
 module HCat where
 
 import qualified System.Environment as Env
@@ -11,6 +12,12 @@ import qualified Data.ByteString as BS
 import qualified System.Info
 import qualified System.Process as Process
 import System.IO
+import qualified Data.Time.Clock as Clock
+import qualified Data.Time.Format as TimeFormat
+import qualified Data.Time.Clock.POSIX as PosixClock
+import qualified System.Directory as Directory
+import qualified Text.Printf as Printf
+import Data.Bool (bool)
 
 data ScreenDimensions = ScreenDimensions
   { screenRows :: Int
@@ -22,23 +29,37 @@ data ContinueCancel
   | Cancel
   deriving (Eq, Show)
 
+data FileInfo = FileInfo
+  { filePath :: FilePath
+  , fileSize :: Int
+  , fileMTime :: Clock.UTCTime
+  , fileReadable :: Bool
+  , fileWriteable :: Bool
+  , fileExecutable :: Bool
+  } deriving Show
+
 runHCat :: IO ()
 runHCat =
-  -- NOTE(luis) a @withErrorHandling@ is used
-  -- in the book vs. the infix version of 'catch'
-  (handleArgs 
-  >>= eitherToErr
-  >>= flip openFile ReadMode
-  >>= TextIO.hGetContents
-  >>= \contents ->
-    getTerminalSize >>= \termSize ->
-      let pages = paginate termSize contents
-      in showPages pages
-  ) `Exception.catch` handleErr
+  -- NOTE(luis) the book no longer handles exceptions at this point
+  Exception.handle handleErr $ do
+    targetFilePath <- do
+      args <- handleArgs
+      eitherToErr args
+    contents <- do
+      handle' <- openFile targetFilePath ReadMode 
+      TextIO.hGetContents handle'
+    
+    termSize <- getTerminalSize
+
+    hSetBuffering stdout NoBuffering
+    
+    finfo <- fileInfo targetFilePath
+    let pages = paginate termSize finfo contents
+    showPages pages
   where
     handleErr :: IOError -> IO ()
     handleErr e = putStrLn "Error!" >> print @IOError e
-    
+
 -- using throwIO vs. throw since it would otherwise be
 -- "unpredictable" when running in IO
 eitherToErr :: Show a => Either a b -> IO b
@@ -81,6 +102,53 @@ showPages (page:pages) =
 clearScreen :: IO ()
 clearScreen = BS.putStr "\^[[1J\^[[1;1H"
 
+fileInfo :: FilePath -> IO FileInfo
+fileInfo filePath = do
+  perms <- Directory.getPermissions filePath
+  mtime <- Directory.getModificationTime filePath
+  -- NOTE(luis) the _code_ says Text, but the explanation
+  -- (rightly) says bytestring:
+  size <- BS.length <$> BS.readFile filePath
+  return FileInfo
+    { filePath = filePath
+    , fileSize = size
+    , fileMTime = mtime
+    , fileReadable = Directory.readable perms
+    , fileWriteable = Directory.writable perms
+    , fileExecutable = Directory.executable perms
+    }
+
+formatFileInfo :: FileInfo -> Int -> Int -> Int -> Text.Text
+formatFileInfo FileInfo{..} maxWidth totalPages currentPage =
+  invertTextColors (truncateStatus statusLine)
+  where
+  statusLine = Text.pack $
+    Printf.printf
+    "%s | permissions: %s | %d bytes | modified: %s | page %d of %d"
+    filePath
+    permissionString
+    fileSize
+    timestamp
+    currentPage
+    totalPages
+  permissionString =
+    [ bool 'r' '-' fileReadable
+    , bool 'w' '-' fileWriteable
+    , bool 'x' '-' fileExecutable
+    ]
+  timestamp =
+    TimeFormat.formatTime TimeFormat.defaultTimeLocale  "%F %T" fileMTime
+  truncateStatus sl
+    | maxWidth <= 3 = ""
+    | Text.length sl > maxWidth = Text.take (maxWidth - 3) statusLine <> "..."
+    | otherwise = sl
+  invertTextColors inputStr =
+    let
+      reverseVideo = "\^[[7m"
+      resetVideo  = "\^[[0m"
+    in reverseVideo <> inputStr <> resetVideo
+
+
 -- >>> groupsOf 3 [1,2,3,4,5,6,7]
 -- [[1,2,3],[4,5,6],[7]]
 -- >>> groupsOf 0 [1,2,3]
@@ -112,12 +180,20 @@ wordWrap lineLength lineText
         in (wrappedLine, Text.tail rest)
       | otherwise = softWrap hardWrappedText (textIndex - 1)
 
-paginate :: ScreenDimensions -> Text.Text -> [Text.Text]
-paginate (ScreenDimensions rows cols) text =
+paginate :: ScreenDimensions -> FileInfo -> Text.Text -> [Text.Text]
+paginate (ScreenDimensions rows cols) finfo text =
   let unwrappedLines = Text.lines text
+      rows' = rows - 1
       wrappedLines   = concatMap (wordWrap cols) unwrappedLines
-      pageLines      = groupsOf rows wrappedLines
-  in map Text.unlines pageLines
+      pages =
+        map (Text.unlines . padTo rows') $ groupsOf rows' wrappedLines
+      pageCount = length pages
+      statusLines = map (formatFileInfo finfo cols pageCount) [1..pageCount]
+  in zipWith (<>) pages statusLines
+  where
+    padTo :: Int -> [Text.Text] -> [Text.Text]
+    padTo lineCount rowsToPad =
+      take lineCount $ rowsToPad <> repeat ""
 
 -- | System-dependent dimension deviser -- uses `tput`
 getTerminalSize :: IO ScreenDimensions
